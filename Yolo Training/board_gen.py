@@ -1,5 +1,4 @@
 from PIL import Image
-from reportlab.graphics import renderPM
 import random
 import os
 import math
@@ -132,7 +131,7 @@ def render_chessboard(chessboard, pieceSet):
 
         piece_color = 'w' if piece.isupper() else 'b'
 
-        piece_image = Image.open(f"pieces/{pieceSet}/{piece_color + piece}.png").convert("RGBA")
+        piece_image = Image.open(f"pieces/{pieceSet}/{piece_color + piece.lower()}.png").convert("RGBA")
         piece_image = piece_image.resize((square_size, square_size), resample=Image.Resampling.LANCZOS)
 
         chessboard_image.paste(piece_image, (x, y), piece_image)
