@@ -2,7 +2,7 @@ from ultralytics import YOLO
 import os
 from PIL import Image
 
-model = YOLO("base_yolo11n.pt")
+model = YOLO("../assets/base_yolo11n.pt")
 model.export(format="onnx")
 
-results = model.train(data="datasets/chess.yaml", epochs=10, imgsz=640)
+results = model.train(data="chess.yaml", epochs=150, imgsz=640)
