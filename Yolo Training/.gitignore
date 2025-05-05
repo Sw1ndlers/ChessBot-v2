@@ -1,0 +1,4 @@
+/datasets/chess_yolo_dataset
+.venv
+__pycache__
+/runs

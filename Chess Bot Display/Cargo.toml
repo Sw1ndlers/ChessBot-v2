@@ -1,0 +1,10 @@
+[package]
+name = "chess-bot-yolo"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ort = "1.16.3"
+xcap = "0.5.1"
+yolo-rs = "0.1.2"
+
