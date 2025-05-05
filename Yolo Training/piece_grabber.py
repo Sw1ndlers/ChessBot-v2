@@ -10,7 +10,7 @@ pieces = ["k", "q", "r", "b", "n", "p"]
 
 piece_styles = [
     "neo",
-    "gameroom",
+    "game_room",
     "wood",
     "glass",
     "gothic",
@@ -18,11 +18,10 @@ piece_styles = [
     "metal",
     "bases",
     "neo_wood",
-    "icysea",
+    "icy_sea",
     "club",
     "ocean",
     "newspaper",
-    "blindfold",
     "space",
     "cases",
     "condal",

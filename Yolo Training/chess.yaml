@@ -1,5 +1,5 @@
-train: chess_yolo_dataset/images/train  
-val: chess_yolo_dataset/images/val  
+train: chess_yolo_dataset/train  
+val: chess_yolo_dataset/val  
 
 nc: 13
 

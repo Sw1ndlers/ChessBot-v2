@@ -4,13 +4,13 @@ import random
 import os
 import math
 from PIL import Image, ImageDraw
-
+import time
 
 # from modified_chess 
 
 # Parameters
 
-num_images = 1
+num_images = 1800
 
 # 80% training 20% validation
 num_images_data = math.ceil(num_images * 0.8)
@@ -37,12 +37,45 @@ piece_classes = {
     "board": 12,
 }
 
-PIECE_SET_NAMES: list[str] = [
-    "alfonso", "alila", "alpha", "atopdown", "california", "cardinal", "cburnett", "chess7",
-    "chessicons", "chessmonk", "chessnut", "companion", "dubrovny", "freestaunton", "fresca", "gioco",
-    "governor", "horsey", "icpieces", "kilfiger", "kosal", "leipzig", "letter", "libra", "maestro",
-    "magnetic", "makruk", "maya", "merida", "merida_new", "metaltops", "pirat", "pirouetti", "pixel",
-    "regular", "reillycraig", "riohacha", "shapes", "sittuyin", "staunty", "tatiana"
+piece_styles = [
+    "neo",
+    "game_room",
+    "wood",
+    "glass",
+    "gothic",
+    "classic",
+    "metal",
+    "bases",
+    "neo_wood",
+    "icy_sea",
+    "club",
+    "ocean",
+    "newspaper",
+    "space",
+    "cases",
+    "condal",
+    "3d_chesskid",
+    "8_bit",
+    "marble",
+    "book",
+    "alpha",
+    "bubblegum",
+    "dash",
+    "graffiti",
+    "light",
+    "lolz",
+    "luca",
+    "maya",
+    "modern",
+    "nature",
+    "neon",
+    "sky",
+    "tigers",
+    "tournament",
+    "vintage",
+    "3d_wood",
+    "3d_staunton",
+    "3d_plastic",
 ]
 
 # Generate random board
@@ -68,35 +101,46 @@ def square_to_yolo_coords(file, rank):
     return x_center, y_center, width, height
 
 
-def render_chessboard(chessboard):
+def render_chessboard(chessboard, pieceSet):
     # board = chess.Board(generate_fen(chessboard))
 
-    # light_color = random_hex_color()
-    # dark_color = random_hex_color()
+    lightSquareColor = random_hex_color()
+    darkSquareColor = random_hex_color()
 
-    # svg_text = modified_chess.svg.board(
-    #     board,
-    #     coordinates=False,
-    #     size=image_size,
-    #     style={"square light": light_color, "square dark": dark_color},
-    # )
-    # drawing = svg2rlg(BytesIO(svg_text.encode("utf-8")))
-
-    chessboard = Image.new("RGB", (image_size, image_size), "white")
-    draw = ImageDraw.Draw(chessboard)
+    chessboard_image = Image.new("RGB", (image_size, image_size), "white")
+    draw = ImageDraw.Draw(chessboard_image)
 
     for row in range(8):
         for col in range(8):
-            if (row + col) % 2 == 1: 
-                top_left = (col * square_size, row * square_size)
-                bottom_right = ((col + 1) * square_size, (row + 1) * square_size)
-                draw.rectangle([top_left, bottom_right], fill="black")
+            top_left = (col * square_size, row * square_size)
+            bottom_right = ((col + 1) * square_size, (row + 1) * square_size)
+        
+            if (row + col) % 2 == 1: # Dark Square
+                draw.rectangle([top_left, bottom_right], fill=darkSquareColor)
+
+            else:
+                draw.rectangle([top_left, bottom_right], fill=lightSquareColor)
+
+    for pos, piece in chessboard.items():
+        if piece == ".":
+            continue
+
+        file, rank = pos[0], int(pos[1])
+
+        x = (ord(file) - ord("a")) * square_size
+        y = (8 - rank) * square_size  # Invert rank for image coordinates
+
+        piece_color = 'w' if piece.isupper() else 'b'
+
+        piece_image = Image.open(f"pieces/{pieceSet}/{piece_color + piece}.png").convert("RGBA")
+        piece_image = piece_image.resize((square_size, square_size), resample=Image.Resampling.LANCZOS)
+
+        chessboard_image.paste(piece_image, (x, y), piece_image)
+
+    return chessboard_image
 
 
-    return chessboard
-
-
-# def createYoloDataset(output_dir, num_images):
+def createYoloDataset(output_dir, num_images):
     images_dir = os.path.join(output_dir, "images")
     labels_dir = os.path.join(output_dir, "labels")
 
@@ -109,10 +153,10 @@ def render_chessboard(chessboard):
 
     for i in range(num_images):
         chessboard = generate_random_chessboard()
-        drawing = render_chessboard(chessboard)
+        drawing = render_chessboard(chessboard, random.choice(piece_styles))
 
         image_file = os.path.join(images_dir, f"output_{i}.png")
-        renderPM.drawToFile(drawing, image_file, fmt="PNG")
+        drawing.save(image_file, "PNG")
 
         # Generate label file
         label_lines = []
@@ -133,18 +177,18 @@ def render_chessboard(chessboard):
             label_file.write("\n".join(label_lines))
 
 
-# start = time.time()
+start = time.time()
 
-# createYoloDataset(os.path.join(output_dir, "train"), num_images_data)
-# createYoloDataset(os.path.join(output_dir, "val"), num_images_val)
+createYoloDataset(os.path.join(output_dir, "train"), num_images_data)
+createYoloDataset(os.path.join(output_dir, "val"), num_images_val)
 
-# end = time.time()
-# print(f"Generated {num_images_data} chess boards in {end - start:.2f} seconds.")
+end = time.time()
+print(f"Generated {num_images_data} chess boards in {end - start:.2f} seconds.")
 
-board = generate_random_chessboard()
-render = render_chessboard(board)
+# board = generate_random_chessboard()
+# render = render_chessboard(board, 'classic')
 
-render.show()
+# render.show()
 
 
 # svg = modified_chess.board(board, size=image_size, svgSetName=PIECE_SET_NAMES[random.randrange(0, len(PIECE_SET_NAMES) - 1)], coordinates=False)
