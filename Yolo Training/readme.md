@@ -1,3 +1,8 @@
+## Pieces Style Sources
+
+chess.com using `piece_grabber.py`
+optionally add `https://github.com/sharechess/sharechess/tree/main/public/pieces`
+
 
 ## Image Gen Dependencies
 
