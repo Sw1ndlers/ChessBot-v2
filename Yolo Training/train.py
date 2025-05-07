@@ -1,8 +1,9 @@
+import torch
 from ultralytics import YOLO
-import os
-from PIL import Image
+
+torch.cuda.set_device(0) # Comment out this line if you want to use CPU
 
 model = YOLO("../assets/base_yolo11n.pt")
-model.export(format="onnx")
+# model.export(format="onnx")
 
-results = model.train(data="chess.yaml", epochs=150, imgsz=640)
+results = model.train(data="chess.yaml", epochs=150, batch=32, imgsz=800, device=0)
