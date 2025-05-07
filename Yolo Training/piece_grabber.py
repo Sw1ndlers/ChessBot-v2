@@ -333,7 +333,8 @@ def download_lichess_pieces():
                 os.makedirs(output_dir, exist_ok=True)
 
                 svg_path = os.path.join(root, file)
-                png_path = os.path.join(output_dir, os.path.splitext(file)[0] + ".png")
+                # Reverse the filename for the output
+                png_path = os.path.join(output_dir, os.path.splitext(file)[0][::-1] + ".png")
 
                 cairosvg.svg2png(url=svg_path, write_to=png_path)
 
