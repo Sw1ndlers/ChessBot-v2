@@ -63,7 +63,7 @@ fn main() -> anyhow::Result<()> {
         .collect::<Vec<RgbaImage>>();
 
     let current_dir = std::env::current_dir().unwrap();
-    let onnx_path = current_dir.parent().unwrap().join("assets/trained.onnx");
+    let onnx_path = current_dir.parent().unwrap().join("assets/best.onnx");
 
     println!("Using onnx @ {:?}", onnx_path);
 
