@@ -94,7 +94,7 @@ fn main() -> anyhow::Result<()> {
         draw_detections(&mut image_with_boxes, &output, "./Roboto-Regular.ttf");
     
         // Save or display the image
-        let output_path = format!("./target/monitors/monitor_{}.png", i);
+        let output_path = format!("./output/monitor_{}.png", i);
         image::save_buffer_with_format(
             &output_path,
             &image_with_boxes,
