@@ -1,7 +1,7 @@
 from ultralytics import YOLO
 import cv2
 
-model = YOLO("best.onnx")  # Just point to your ONNX model
+model = YOLO("../assets/best.onnx")  # Just point to your ONNX model
 results = model("test_image.png")
 
 # Get annotated image (NumPy array)
