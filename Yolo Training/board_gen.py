@@ -6,18 +6,20 @@ import math
 from PIL import Image, ImageDraw
 import time
 
-# from modified_chess 
+# from modified_chess
 
 # Parameters
 
-num_images = 1800
+num_images = 10
 
 # 80% training 20% validation
 num_images_data = math.ceil(num_images * 0.8)
 num_images_val = num_images - num_images_data
 
-image_size = 800
-square_size = image_size // 8  # 100
+monitor_size = (1980, 1080)
+board_size = 800
+
+square_size = board_size // 8  # 100
 output_dir = "datasets/chess_yolo_dataset"
 
 piece_classes = {
@@ -309,10 +311,54 @@ lichess_piece_styles = [
 
 piece_styles = chesscom_piece_styles + lichess_piece_styles
 
+def add_occlusions(image, num_occlusions=5):
+    draw = ImageDraw.Draw(image)
+    for _ in range(num_occlusions):
+        x1 = random.randint(0, image.width)
+        y1 = random.randint(0, image.height)
+        x2 = x1 + random.randint(30, 100)
+        y2 = y1 + random.randint(30, 100)
+        color = random_hex_color()
+        shape_type = random.choice(["rectangle", "ellipse"])
+        if shape_type == "rectangle":
+            draw.rectangle([x1, y1, x2, y2], fill=color)
+        else:
+            draw.ellipse([x1, y1, x2, y2], fill=color)
+
+def generate_image_background(image_size, num_shapes=10, max_offset=100):
+    background = Image.new("RGBA", image_size, "white")
+    draw = ImageDraw.Draw(background)
+
+    for _ in range(num_shapes):
+        shape_type = random.choice(["ellipse", "rectangle", "polygon"])
+        shape_color = random_hex_color()
+
+        # Allow shapes to go off-screen by offsetting their coordinates
+        x1 = random.randint(-max_offset, image_size[0] + max_offset)
+        y1 = random.randint(-max_offset, image_size[1] + max_offset)
+        x2 = random.randint(x1, x1 + image_size[0] + 2 * max_offset)
+        y2 = random.randint(y1, y1 + image_size[1] + 2 * max_offset)
+
+        if shape_type == "ellipse":
+            draw.ellipse([x1, y1, x2, y2], fill=shape_color, outline=None)
+        elif shape_type == "rectangle":
+            draw.rectangle([x1, y1, x2, y2], fill=shape_color, outline=None)
+        elif shape_type == "polygon":
+            # Generate random number of points for the polygon
+            num_points = random.randint(3, 6)
+            points = [
+                (
+                    random.randint(-max_offset, image_size[0] + max_offset),
+                    random.randint(-max_offset, image_size[1] + max_offset),
+                )
+                for _ in range(num_points)
+            ]
+            draw.polygon(points, fill=shape_color, outline=None)
+
+    return background
+
+
 def preload_piece_images(piece_styles, square_size):
-    print("Preloading piece images...")
-    start_time = time.time()
-    
     piece_images = {}
     total_loaded = 0
 
@@ -325,15 +371,14 @@ def preload_piece_images(piece_styles, square_size):
 
                 try:
                     image = Image.open(path).convert("RGBA")
-                    image = image.resize((square_size, square_size), resample=Image.Resampling.LANCZOS)
+                    image = image.resize(
+                        (square_size, square_size), resample=Image.Resampling.LANCZOS
+                    )
                     piece_images[piece_key] = image
                     total_loaded += 1
 
                 except FileNotFoundError:
                     print(f"Warning: Missing piece image at {path}")
-
-    elapsed = time.time() - start_time
-    print(f"Loaded {total_loaded} piece images in {elapsed:.2f} seconds.")
 
     return piece_images
 
@@ -347,33 +392,69 @@ def generate_random_chessboard():
         chessboard[pos] = random.choice(pieces)
     return chessboard
 
+
 def random_hex_color():
     return "#{:06x}".format(random.randint(0, 0xFFFFFF))
 
 
 # Get square center in normalized coordinates
 def square_to_yolo_coords(file, rank):
+
     file_idx = ord(file) - ord("a")
     rank_idx = 8 - rank  # rank 8 is top
-    x_center = (file_idx + 0.5) * square_size / image_size
-    y_center = (rank_idx + 0.5) * square_size / image_size
-    width = height = square_size / image_size
+    x_center = (file_idx + 0.5) * square_size / board_size
+    y_center = (rank_idx + 0.5) * square_size / board_size
+
+    width = height = square_size / board_size
     return x_center, y_center, width, height
 
 
-def render_chessboard(chessboard, piece_set, piece_images):
+class ChessDatasetConfig:
+    def __init__(self, piece_styles, piece_images, output_dir, background_images):
+        self.piece_styles = piece_styles
+        self.piece_images = piece_images
+        self.output_dir = output_dir
+
+        self.background_images = background_images
+
+        # Derive image and label directories
+        self.images_dir = os.path.join(self.output_dir, "images")
+        self.labels_dir = os.path.join(self.output_dir, "labels")
+
+        # Create directories if they don't exist
+        self.create_directories()
+
+    def create_directories(self):
+        os.makedirs(self.images_dir, exist_ok=True)
+        os.makedirs(self.labels_dir, exist_ok=True)
+
+
+def render_chessboard(chessboard, config):
     lightSquareColor = random_hex_color()
     darkSquareColor = random_hex_color()
 
-    chessboard_image = Image.new("RGB", (image_size, image_size), "white")
+    background_image = random.choice(config.background_images)
+
+    chessboard_image = Image.new("RGBA", (board_size, board_size), "white")
     draw = ImageDraw.Draw(chessboard_image)
+
+    piece_style = random.choice(config.piece_styles)
+
+    # Calculate random position to paste the chessboard on the background
+    max_x = background_image.width - board_size
+    max_y = background_image.height - board_size
+
+    random_x = random.randint(0, max_x)
+    random_y = random.randint(0, max_y)
+
+    label_lines = []
 
     for row in range(8):
         for col in range(8):
             top_left = (col * square_size, row * square_size)
             bottom_right = ((col + 1) * square_size, (row + 1) * square_size)
-        
-            if (row + col) % 2 == 1: # Dark Square
+
+            if (row + col) % 2 == 1:  # Dark Square
                 draw.rectangle([top_left, bottom_right], fill=darkSquareColor)
 
             else:
@@ -388,54 +469,75 @@ def render_chessboard(chessboard, piece_set, piece_images):
         x = (ord(file) - ord("a")) * square_size
         y = (8 - rank) * square_size  # Invert rank for image coordinates
 
-        piece_color = 'w' if piece.isupper() else 'b'
+        piece_color = "w" if piece.isupper() else "b"
+        piece_key = f"{piece_style}_{piece_color + piece.lower()}"
 
-        piece_key = f"{piece_set}_{piece_color + piece.lower()}"
-
-        piece_image = piece_images.get(piece_key)
-        piece_image = piece_image.resize((square_size, square_size), resample=Image.Resampling.LANCZOS)
+        piece_image = config.piece_images.get(piece_key)
+        piece_image = piece_image.resize(
+            (square_size, square_size), resample=Image.Resampling.LANCZOS
+        )
 
         chessboard_image.paste(piece_image, (x, y), piece_image)
 
-    return chessboard_image
+        # Calculate the position of the piece in the full image
+        absolute_x = random_x + x + (square_size / 2)
+        absolute_y = random_y + y + (square_size / 2)
 
+        absolute_x /= 1980  # Normalize to the 1980x1080 image
+        absolute_y /= 1080  # Normalize to the 1980x1080 image
 
-def create_labeled_image(i, images_dir, labels_dir, piece_styles, piece_images):
-    chessboard = generate_random_chessboard()
-    style = random.choice(piece_styles)
-    drawing = render_chessboard(chessboard, style, piece_images)
+        absolute_width = square_size / 1980
+        absolute_height = square_size / 1080
 
-    image_file = os.path.join(images_dir, f"output_{i}.png")
-    drawing.save(image_file, "PNG")
-
-    # Generate YOLO label lines
-    label_lines = [f"{piece_classes['board']} 0.5 0.5 1.0 1.0"]
-    for pos, piece in chessboard.items():
-        if piece == ".":
-            continue
         class_id = piece_classes[piece]
-        file, rank = pos[0], int(pos[1])
-        x, y, w, h = square_to_yolo_coords(file, rank)
-        label_lines.append(f"{class_id} {x:.6f} {y:.6f} {w:.6f} {h:.6f}")
 
-    with open(os.path.join(labels_dir, f"output_{i}.txt"), "w") as label_file:
-        label_file.write("\n".join(label_lines))
+        label_lines.append(
+            format_yolo_label(class_id, absolute_x, absolute_y, absolute_width, absolute_height)
+        )
 
-def createYoloDataset(output_dir, num_images, piece_images):
-    images_dir = os.path.join(output_dir, "images")
-    labels_dir = os.path.join(output_dir, "labels")
+    label_lines.append(
+        format_yolo_label(
+            piece_classes["board"],
+            (random_x + (board_size / 2)) / 1980,
+            (random_y + (board_size / 2)) / 1080,
+            board_size / 1980,
+            board_size / 1080,
+        )
+    )
 
-    os.makedirs(images_dir, exist_ok=True)
-    os.makedirs(labels_dir, exist_ok=True)
+    # Paste the chessboard on the background
+    background_image.paste(chessboard_image, (random_x, random_y), chessboard_image)
 
-    with open(os.path.join(output_dir, "classes.txt"), "w") as f:
+    return background_image, label_lines
+
+
+def create_labeled_image(i, config):
+    chessboard = generate_random_chessboard()
+
+    chessboard_render, label_lines = render_chessboard(chessboard, config)
+    add_occlusions(chessboard_render, num_occlusions=5)
+
+    image_file = os.path.join(config.images_dir, f"output_{i}.png")
+    chessboard_render.save(image_file, "PNG")
+
+    label_file = os.path.join(config.labels_dir, f"output_{i}.txt")
+
+    with open(label_file, "w") as label_f:
+        label_f.write("\n".join(label_lines))
+
+
+def format_yolo_label(class_id, x_center, y_center, width, height):
+    return f"{class_id} {x_center:.8f} {y_center:.8f} {width:.8f} {height:.8f}"
+
+
+def createYoloDataset(config):
+    with open(os.path.join(config.output_dir, "classes.txt"), "w") as f:
         for piece in piece_classes:
             f.write(f"{piece}\n")
-    
+
     with ThreadPoolExecutor() as executor:
         futures = [
-            executor.submit(create_labeled_image, i, images_dir, labels_dir, piece_styles, piece_images)
-            for i in range(num_images)
+            executor.submit(create_labeled_image, i, config) for i in range(num_images)
         ]
         for f in futures:
             f.result()  # Wait for all to complete (to catch any exceptions)
@@ -443,10 +545,33 @@ def createYoloDataset(output_dir, num_images, piece_images):
 
 start = time.time()
 
+print("Preloading piece images...")
 piece_images = preload_piece_images(piece_styles, square_size)
+print(f"Loaded piece images in {time.time() - start:.2f} seconds.\n")
 
-createYoloDataset(os.path.join(output_dir, "train"), num_images_data, piece_images)
-createYoloDataset(os.path.join(output_dir, "val"), num_images_val, piece_images)
+print("Creating random backgrounds...")
+background_images = [
+    generate_image_background((monitor_size[0], monitor_size[1]), num_shapes=50)
+    for _ in range(500)
+]
+print(f"Random backgrounds created in {time.time() - start:.2f} seconds.")
+
+config = ChessDatasetConfig(
+    piece_styles=piece_styles,
+    piece_images=piece_images,
+    output_dir="datasets/chess_yolo_dataset/train",
+    background_images=background_images,
+)
+
+config_val = ChessDatasetConfig(
+    piece_styles=piece_styles,
+    piece_images=piece_images,
+    output_dir="datasets/chess_yolo_dataset/val",
+    background_images=background_images,
+)
+
+createYoloDataset(config)
+createYoloDataset(config_val)
 
 end = time.time()
 print(f"Generated {num_images_data} chess boards in {end - start:.2f} seconds.")
