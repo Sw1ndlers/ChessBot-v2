@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor
 from PIL import Image
 import random
 import os
@@ -308,6 +309,35 @@ lichess_piece_styles = [
 
 piece_styles = chesscom_piece_styles + lichess_piece_styles
 
+def preload_piece_images(piece_styles, square_size):
+    print("Preloading piece images...")
+    start_time = time.time()
+    
+    piece_images = {}
+    total_loaded = 0
+
+    for style in piece_styles:
+        for color in ["w", "b"]:
+            for piece in "kqrbnp":
+
+                piece_key = f"{style}_{color}{piece}"
+                path = f"pieces/{style}/{color}{piece}.png"
+
+                try:
+                    image = Image.open(path).convert("RGBA")
+                    image = image.resize((square_size, square_size), resample=Image.Resampling.LANCZOS)
+                    piece_images[piece_key] = image
+                    total_loaded += 1
+
+                except FileNotFoundError:
+                    print(f"Warning: Missing piece image at {path}")
+
+    elapsed = time.time() - start_time
+    print(f"Loaded {total_loaded} piece images in {elapsed:.2f} seconds.")
+
+    return piece_images
+
+
 # Generate random board
 def generate_random_chessboard():
     pieces = list(piece_classes.keys())[:-1]  # exclude 'board'
@@ -331,9 +361,7 @@ def square_to_yolo_coords(file, rank):
     return x_center, y_center, width, height
 
 
-def render_chessboard(chessboard, pieceSet):
-    # board = chess.Board(generate_fen(chessboard))
-
+def render_chessboard(chessboard, piece_set, piece_images):
     lightSquareColor = random_hex_color()
     darkSquareColor = random_hex_color()
 
@@ -362,7 +390,9 @@ def render_chessboard(chessboard, pieceSet):
 
         piece_color = 'w' if piece.isupper() else 'b'
 
-        piece_image = Image.open(f"pieces/{pieceSet}/{piece_color + piece.lower()}.png").convert("RGBA")
+        piece_key = f"{piece_set}_{piece_color + piece.lower()}"
+
+        piece_image = piece_images.get(piece_key)
         piece_image = piece_image.resize((square_size, square_size), resample=Image.Resampling.LANCZOS)
 
         chessboard_image.paste(piece_image, (x, y), piece_image)
@@ -370,7 +400,28 @@ def render_chessboard(chessboard, pieceSet):
     return chessboard_image
 
 
-def createYoloDataset(output_dir, num_images):
+def create_labeled_image(i, images_dir, labels_dir, piece_styles, piece_images):
+    chessboard = generate_random_chessboard()
+    style = random.choice(piece_styles)
+    drawing = render_chessboard(chessboard, style, piece_images)
+
+    image_file = os.path.join(images_dir, f"output_{i}.png")
+    drawing.save(image_file, "PNG")
+
+    # Generate YOLO label lines
+    label_lines = [f"{piece_classes['board']} 0.5 0.5 1.0 1.0"]
+    for pos, piece in chessboard.items():
+        if piece == ".":
+            continue
+        class_id = piece_classes[piece]
+        file, rank = pos[0], int(pos[1])
+        x, y, w, h = square_to_yolo_coords(file, rank)
+        label_lines.append(f"{class_id} {x:.6f} {y:.6f} {w:.6f} {h:.6f}")
+
+    with open(os.path.join(labels_dir, f"output_{i}.txt"), "w") as label_file:
+        label_file.write("\n".join(label_lines))
+
+def createYoloDataset(output_dir, num_images, piece_images):
     images_dir = os.path.join(output_dir, "images")
     labels_dir = os.path.join(output_dir, "labels")
 
@@ -380,52 +431,22 @@ def createYoloDataset(output_dir, num_images):
     with open(os.path.join(output_dir, "classes.txt"), "w") as f:
         for piece in piece_classes:
             f.write(f"{piece}\n")
-
-    for i in range(num_images):
-        chessboard = generate_random_chessboard()
-        drawing = render_chessboard(chessboard, random.choice(piece_styles))
-
-        image_file = os.path.join(images_dir, f"output_{i}.png")
-        drawing.save(image_file, "PNG")
-
-        # Generate label file
-        label_lines = []
-
-        # Add the board as a whole (class_id 12)
-        label_lines.append(f"{piece_classes['board']} 0.5 0.5 1.0 1.0")
-
-        # Add each piece
-        for pos, piece in chessboard.items():
-            if piece == ".":
-                continue
-            class_id = piece_classes[piece]
-            file, rank = pos[0], int(pos[1])
-            x, y, w, h = square_to_yolo_coords(file, rank)
-            label_lines.append(f"{class_id} {x:.6f} {y:.6f} {w:.6f} {h:.6f}")
-
-        with open(os.path.join(labels_dir, f"output_{i}.txt"), "w") as label_file:
-            label_file.write("\n".join(label_lines))
+    
+    with ThreadPoolExecutor() as executor:
+        futures = [
+            executor.submit(create_labeled_image, i, images_dir, labels_dir, piece_styles, piece_images)
+            for i in range(num_images)
+        ]
+        for f in futures:
+            f.result()  # Wait for all to complete (to catch any exceptions)
 
 
 start = time.time()
 
-createYoloDataset(os.path.join(output_dir, "train"), num_images_data)
-createYoloDataset(os.path.join(output_dir, "val"), num_images_val)
+piece_images = preload_piece_images(piece_styles, square_size)
+
+createYoloDataset(os.path.join(output_dir, "train"), num_images_data, piece_images)
+createYoloDataset(os.path.join(output_dir, "val"), num_images_val, piece_images)
 
 end = time.time()
 print(f"Generated {num_images_data} chess boards in {end - start:.2f} seconds.")
-
-# board = generate_random_chessboard()
-# render = render_chessboard(board, 'classic')
-
-# render.show()
-
-
-# svg = modified_chess.board(board, size=image_size, svgSetName=PIECE_SET_NAMES[random.randrange(0, len(PIECE_SET_NAMES) - 1)], coordinates=False)
-# print(svg)
-
-# drawing = svg2rlg(BytesIO(svg.encode("utf-8")))
-# renderPM.drawToFile(drawing, "output.png", fmt="PNG")
-
-
-# print(f"Generated {num_images} images and YOLO labels with board and pieces.")
