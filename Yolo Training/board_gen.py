@@ -10,11 +10,11 @@ import time
 
 # Parameters
 
-num_images = 10
+num_images_total = 1000
 
 # 80% training 20% validation
-num_images_data = math.ceil(num_images * 0.8)
-num_images_val = num_images - num_images_data
+num_images_data = math.ceil(num_images_total * 0.8)
+num_images_val = num_images_total - num_images_data
 
 monitor_size = (1980, 1080)
 board_size = 800
@@ -410,12 +410,13 @@ def square_to_yolo_coords(file, rank):
 
 
 class ChessDatasetConfig:
-    def __init__(self, piece_styles, piece_images, output_dir, background_images):
+    def __init__(self, piece_styles, piece_images, output_dir, background_images, num_images):
         self.piece_styles = piece_styles
         self.piece_images = piece_images
         self.output_dir = output_dir
 
         self.background_images = background_images
+        self.num_images = num_images
 
         # Derive image and label directories
         self.images_dir = os.path.join(self.output_dir, "images")
@@ -433,7 +434,7 @@ def render_chessboard(chessboard, config):
     lightSquareColor = random_hex_color()
     darkSquareColor = random_hex_color()
 
-    background_image = random.choice(config.background_images)
+    background_image = random.choice(config.background_images).copy()
 
     chessboard_image = Image.new("RGBA", (board_size, board_size), "white")
     draw = ImageDraw.Draw(chessboard_image)
@@ -530,14 +531,14 @@ def format_yolo_label(class_id, x_center, y_center, width, height):
     return f"{class_id} {x_center:.8f} {y_center:.8f} {width:.8f} {height:.8f}"
 
 
-def createYoloDataset(config):
+def create_yolo_dataset(config):
     with open(os.path.join(config.output_dir, "classes.txt"), "w") as f:
         for piece in piece_classes:
             f.write(f"{piece}\n")
 
     with ThreadPoolExecutor() as executor:
         futures = [
-            executor.submit(create_labeled_image, i, config) for i in range(num_images)
+            executor.submit(create_labeled_image, i, config) for i in range(config.num_images)
         ]
         for f in futures:
             f.result()  # Wait for all to complete (to catch any exceptions)
@@ -550,7 +551,11 @@ piece_images = preload_piece_images(piece_styles, square_size)
 print(f"Loaded piece images in {time.time() - start:.2f} seconds.\n")
 
 print("Creating random backgrounds...")
-background_images = [
+background_images_train = [
+    generate_image_background((monitor_size[0], monitor_size[1]), num_shapes=50)
+    for _ in range(500)
+]
+background_images_val = [
     generate_image_background((monitor_size[0], monitor_size[1]), num_shapes=50)
     for _ in range(500)
 ]
@@ -560,18 +565,20 @@ config = ChessDatasetConfig(
     piece_styles=piece_styles,
     piece_images=piece_images,
     output_dir="datasets/chess_yolo_dataset/train",
-    background_images=background_images,
+    background_images=background_images_train,
+    num_images=num_images_data,
 )
 
 config_val = ChessDatasetConfig(
     piece_styles=piece_styles,
     piece_images=piece_images,
     output_dir="datasets/chess_yolo_dataset/val",
-    background_images=background_images,
+    background_images=background_images_val,
+    num_images=num_images_val,
 )
 
-createYoloDataset(config)
-createYoloDataset(config_val)
+create_yolo_dataset(config)
+create_yolo_dataset(config_val)
 
 end = time.time()
-print(f"Generated {num_images_data} chess boards in {end - start:.2f} seconds.")
+print(f"Generated {num_images_total} chess boards in {end - start:.2f} seconds.")
