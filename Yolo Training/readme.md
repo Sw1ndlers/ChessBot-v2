@@ -40,7 +40,7 @@ sudo apt install libcairo2 libcairo2-dev
 Python Dependencies:  
 
 ```psh
-pip insgall svglib chess 
+pip insgall svglib cairosvg pillow gitpython ultralytics torch 
 ```
 
 <!-- https://docs.ultralytics.com/datasets/segment/coco8-seg/#sample-images-and-annotations -->
