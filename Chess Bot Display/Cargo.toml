@@ -4,13 +4,12 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-ab_glyph = "0.2.29"
+ort = {version = "2.0.0-rc.9", features = ["fetch-models", "load-dynamic"] }
+ndarray = "0.16"
+tracing-subscriber = { version = "0.3", default-features = false, features = [ "env-filter", "fmt" ] }
+image = "0.25"
+show-image = { version = "=0.14.0", features = [ "image", "raqote" ] }
+raqote = { version = "0.8", default-features = false }
+tracing = "0.1"
 anyhow = "1.0.98"
-arcstr = "1.2.0"
-image = "0.25.6"
-imageproc = "0.25.0"
-ort = "1.16.3"
-rusttype = "0.9.3"
-xcap = "0.5.1"
-yolo-rs = "0.1.2"
 

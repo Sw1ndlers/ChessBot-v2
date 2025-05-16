@@ -1,7 +1,0 @@
-/datasets/chess_yolo_dataset
-.venv
-__pycache__
-/runs
-/pieces
-/temp_sharechess_repo
-test_image.png
