@@ -7,8 +7,15 @@
 
 ### Chess Bot Display  
 A wip user interface for the chess bot.  
-Planned to be implemented in rust using the native windows api.  
+Planned to be implemented in **rust** using the native windows api.  
 Running the model trained in `Chess Bot Training`
 
 ### Chess Bot Training
-A 
+A python project that scrapes chess pieces. 
+Generates a chess board dataset. 
+Trains a YOLOv8 model to detect the board.
+Sends the model to be used in `Chess Bot Display`.
+
+
+#### Current Model Results:
+
