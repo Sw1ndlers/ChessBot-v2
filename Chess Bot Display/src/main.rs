@@ -1,193 +1,156 @@
-use std::path::Path;
+use std::io::Cursor;
 
-use image::{GenericImageView, ImageBuffer, Rgb, Rgba, imageops::FilterType};
-use ndarray::{Array, Axis, s};
-use ort::{
-    inputs,
-    session::{Session, SessionOutputs},
-    value::{Tensor, TensorRef},
-};
+use image::codecs::png::PngEncoder;
+use image::{ColorType, GenericImageView, ImageBuffer, ImageEncoder, Rgba};
+use pyo3::types::{IntoPyDict, PyBytes, PyList};
+use pyo3::{prelude::*, py_run};
+
 use raqote::{DrawOptions, DrawTarget, LineJoin, PathBuilder, SolidSource, Source, StrokeStyle};
-use show_image::{AsImageView, Image, WindowOptions, event};
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-#[derive(Debug, Clone, Copy)]
-struct BoundingBox {
-    x1: f32,
-    y1: f32,
-    x2: f32,
-    y2: f32,
-}
+// fn vec_u8_to_png_buffer(
+//     raw_pixels: Vec<u8>,
+//     width: u32,
+//     height: u32,
+//     color_type: ColorType,
+// ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+//     // Create a buffer to write PNG into
+//     let mut png_buffer = Cursor::new(Vec::new());
 
-fn intersection(box1: &BoundingBox, box2: &BoundingBox) -> f32 {
-    (box1.x2.min(box2.x2) - box1.x1.max(box2.x1)) * (box1.y2.min(box2.y2) - box1.y1.max(box2.y1))
-}
+//     // Choose a PNG encoder
+//     let encoder = image::codecs::png::PngEncoder::new(&mut png_buffer);
 
-fn union(box1: &BoundingBox, box2: &BoundingBox) -> f32 {
-    ((box1.x2 - box1.x1) * (box1.y2 - box1.y1)) + ((box2.x2 - box2.x1) * (box2.y2 - box2.y1))
-        - intersection(box1, box2)
-}
+//     // Encode the image
+//     encoder.encode(&raw_pixels, width, height, color_type)?;
 
-// #[rustfmt::skip]
-// const YOLOV8_CLASS_LABELS: [&str; 13] = [
-//     "king", "queen", "rook", "bishop", "knight", "pawn",
-//     "king", "queen", "rook", "bishop", "knight", "pawn",
-//     "board"
-// ];
+//     // Return the internal buffer (now containing PNG bytes)
+//     Ok(png_buffer.into_inner())
+// }
 
-const YOLOV8_CLASS_LABELS: [&str; 13] = [
-    "K", "Q", "R", "B", "N", "P", "k", "q", "r", "b", "n", "p", "board",
-];
-
-#[show_image::main]
 fn main() -> anyhow::Result<()> {
-    // Initialize tracing to receive debug messages from `ort`
-    // tracing_subscriber::registry()
-    // 	.with(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info,ort=debug".into()))
-    // 	.with(tracing_subscriber::fmt::layer())
-    // 	.init();
+    let mut base_image = image::open("output/monitor_1.png")?;
 
-    let current_dir = std::env::current_dir()?;
+    Python::with_gil(|py| {
+        let img_data = image::open("output/monitor_1.png")?;
+        let (image_width, image_height) = img_data.dimensions();
 
-    let original_img = image::open(current_dir.join("test_image.png")).unwrap();
-    let (img_width, img_height) = (original_img.width(), original_img.height());
+        let byte_array = img_data.to_rgba8().into_raw();
 
-    let img = original_img.resize_exact(640, 640, FilterType::CatmullRom);
+        let mut buffer = Cursor::new(Vec::new());
+        let encoder = PngEncoder::new(&mut buffer);
 
-    let mut input = Array::zeros((1, 3, 640, 640));
+        encoder.write_image(
+            &byte_array,
+            image_width,
+            image_height,
+            ColorType::Rgba8.into(),
+        )?;
 
-    for pixel in img.pixels() {
-        let x = pixel.0 as _;
-        let y = pixel.1 as _;
-        let [r, g, b, _] = pixel.2.0;
-        input[[0, 0, y, x]] = (r as f32) / 255.;
-        input[[0, 1, y, x]] = (g as f32) / 255.;
-        input[[0, 2, y, x]] = (b as f32) / 255.;
-    }
+        let png_buffer = buffer.into_inner();
 
-    // Save the resized image for debugging
-    img.save(current_dir.join("stages/resized_image.png"))
-        .unwrap();
+        let pil = PyModule::import(py, "PIL.Image")?;
+        let io = PyModule::import(py, "io")?;
+        let ultralytics = PyModule::import(py, "ultralytics")?;
 
-    let assets_folder = current_dir.parent().unwrap().join("assets");
-    let model_path = assets_folder.join("best.onnx");
+        let model = ultralytics
+            .getattr("YOLO")?
+            .call1(("../assets/best.onnx",))?;
 
-    println!("Loading model from path: {:?}", model_path);
+        let py_bytes = PyBytes::new(py, &png_buffer);
+        let io_buffer = io.call_method1("BytesIO", (py_bytes,))?;
 
-    let model = Session::builder()?.commit_from_file(model_path)?;
-    let tensor = Tensor::from_array(input)?;
+        let pil_img = pil.call_method1("open", (io_buffer,))?;
 
-    let inputs = inputs!["images" => tensor]?;
-    let outputs: SessionOutputs = model.run(inputs)?;
+        let start_time = std::time::Instant::now();
 
-    println!("Output: {:?}", outputs);
+        // Step 5: Run prediction
+        let kwargs = [("source", pil_img)].into_py_dict(py)?;
+        let result = model
+            .call_method("predict", (), Some(&kwargs))?
+            .get_item(0)?;
 
-    let ouput = &outputs["output0"];
-    let output = ouput.try_extract_tensor::<f32>()?.reversed_axes();
+        println!("Prediction results: {:?}", result);
 
-    // println!("Output shape: {:?}", output.shape());
-    // println!("Output data: {:?}", output);
+        let boxes = result.getattr("boxes")?;
+        let xyxy = boxes.getattr("xyxy")?; // Tensor of shape (N, 4)
+        let cls_ids = boxes.getattr("cls")?; // Tensor of shape (N,)
 
-    let mut boxes = Vec::new();
-    let output = output.slice(s![.., .., 0]);
+        // Convert tensors to Python lists (optionally NumPy if needed)
+        let binding = xyxy.call_method0("tolist")?;
+        let xyxy_list = binding
+            .downcast::<PyList>()
+            .map_err(|e| anyhow::anyhow!("xyxy downcast failed: {e}"))?;
 
-    for row in output.axis_iter(Axis(0)) {
-        let row: Vec<_> = row.iter().copied().collect();
+        let binding = cls_ids.call_method0("tolist")?;
+        let cls_list = binding
+            .downcast::<PyList>()
+            .map_err(|e| anyhow::anyhow!("cls_ids downcast failed: {e}"))?;
 
-        let (class_id, prob) = row
-            .iter()
-            // skip bounding box coordinates
-            .skip(4)
-            .enumerate()
-            .map(|(index, value)| (index, *value))
-            .reduce(|accum, row| if row.1 > accum.1 { row } else { accum })
-            .unwrap();
+        let conf_list = boxes.getattr("conf")?.call_method0("tolist")?;
+        let conf_list = conf_list
+            .downcast::<PyList>()
+            .map_err(|e| anyhow::anyhow!("conf_list downcast failed: {e}"))?;
 
-        // if prob < 0.3 {
-        //     continue;
-        // }
-        let label = YOLOV8_CLASS_LABELS[class_id];
+        // Get class name mapping from the model
+        let names = model.getattr("names")?; // dict: class_id -> class_name
 
-        let xc = row[0] / 640. * (img_width as f32);
-        let yc = row[1] / 640. * (img_height as f32);
-        let w = row[2] / 640. * (img_width as f32);
-        let h = row[3] / 640. * (img_height as f32);
+        println!("Took {} ms", start_time.elapsed().as_millis());
 
-        boxes.push((
-            BoundingBox {
-                x1: xc - w / 2.,
-                y1: yc - h / 2.,
-                x2: xc + w / 2.,
-                y2: yc + h / 2.,
-            },
-            label,
-            prob,
-        ));
+        let mut dt = DrawTarget::new(image_width as _, image_height as _);
 
-        println!("Class Name: {}, Probability: {}", YOLOV8_CLASS_LABELS[class_id], prob);
-    }
+        // Iterate through detections
+        for (i, bbox) in xyxy_list.iter().enumerate() {
+            let cls_id = cls_list.get_item(i)?;
+            let class_name = names.get_item(cls_id)?;
+            let confidence = conf_list.get_item(i)?.extract::<f32>()?;
+            let bbox_values = bbox.extract::<[f32; 4]>()?;
 
-    boxes.sort_by(|box1, box2| box2.2.total_cmp(&box1.2));
+            if confidence < 0.9 {
+                continue; // Skip low-confidence detections
+            }
+            println!(
+                "Detection {}: box = {:?}, confidence = {}",
+                i, bbox_values, confidence
+            );
 
-    // println!("Boxes: {:?}", boxes);
+            let (x1, y1, x2, y2) = (
+                bbox_values[0] as f32,
+                bbox_values[1] as f32,
+                bbox_values[2] as f32,
+                bbox_values[3] as f32,
+            );
 
-    let mut result = Vec::new();
-    while !boxes.is_empty() {
-        result.push(boxes[0]);
-        boxes = boxes
-            .iter()
-            .filter(|box1| intersection(&boxes[0].0, &box1.0) / union(&boxes[0].0, &box1.0) < 0.7)
-            .copied()
-            .collect();
-    }
+            // for (bbox, label, _confidence) in result {
+            let mut pb = PathBuilder::new();
+            pb.rect(x1, y1, x2 - x1, y2 - y1);
+            let path = pb.finish();
 
-    println!("Filtered Boxes: {:#?}", result);
-
-    let mut dt = DrawTarget::new(img_width as _, img_height as _);
-
-    for (bbox, label, _confidence) in result {
-        let mut pb = PathBuilder::new();
-        pb.rect(bbox.x1, bbox.y1, bbox.x2 - bbox.x1, bbox.y2 - bbox.y1);
-        let path = pb.finish();
-
-        let color = match label {
-            _ => SolidSource {
+            let color = SolidSource {
                 r: 0x80,
                 g: 0x10,
                 b: 0x40,
                 a: 0x80,
-            },
-        };
-        dt.stroke(
-            &path,
-            &Source::Solid(color),
-            &StrokeStyle {
-                join: LineJoin::Round,
-                width: 4.,
-                ..StrokeStyle::default()
-            },
-            &DrawOptions::new(),
-        );
-    }
+            };
 
-    let image_buffer: ImageBuffer<Rgba<u8>, Vec<u8>> =
-        ImageBuffer::from_raw(img_width, img_height, dt.get_data_u8().to_vec()).unwrap();
-    let overlay = image::DynamicImage::ImageRgba8(image_buffer).to_rgba8();
+            dt.stroke(
+                &path,
+                &Source::Solid(color),
+                &StrokeStyle {
+                    join: LineJoin::Round,
+                    width: 4.,
+                    ..StrokeStyle::default()
+                },
+                &DrawOptions::new(),
+            );
+        }
 
-    let mut base_image = original_img.clone();
-    image::imageops::overlay(&mut base_image, &overlay, 0, 0);
+        let image_buffer: ImageBuffer<Rgba<u8>, Vec<u8>> =
+            ImageBuffer::from_raw(image_width, image_height, dt.get_data_u8().to_vec()).unwrap();
+        let overlay = image::DynamicImage::ImageRgba8(image_buffer).to_rgba8();
 
-    base_image
-        .save(current_dir.join("stages/overlay.png"))
-        .unwrap();
+        image::imageops::overlay(&mut base_image, &overlay, 0, 0);
 
-    // let output_path = current_dir.join("output.png");
-    // let data = dt.get_data_u8();
-    // let image: ImageBuffer<Rgb<u8>, _> = ImageBuffer::from_raw(img_width, img_height, data).unwrap();
+        base_image.save("stages/overlay.png").unwrap();
 
-    // image.save(&output_path).unwrap();
-
-    println!("Output saved");
-
-    Ok(())
+        Ok(())
+    })
 }
