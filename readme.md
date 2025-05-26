@@ -1,6 +1,6 @@
 # Chess Bot v2
 
-### A recreation of my old (and not very good) [Chess Bot](https://github.com/Sw1ndlers/ChessBot)
+### A recreation of my old [Chess Bot](https://github.com/Sw1ndlers/ChessBot)
 
 
 ## The project is split into 2 parts:
